@@ -1,0 +1,151 @@
+services:
+  mysql-orders:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: orders
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./orders-service/INIT.sql:/docker-entrypoint-initdb.d/01-orders.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mysql-payments:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: payments
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_payments_data:/var/lib/mysql
+      - ./payments-service/INIT.sql:/docker-entrypoint-initdb.d/01-payments.sql:ro
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres-inventory:
+    image: postgres:17
+    container_name: inventory-postgres
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./inventory-service/INIT.sql:/docker-entrypoint-initdb.d/01-inventory.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    hostname: redis
+    restart: always
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"   # para acesso do host em dev
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Criando tópicos Kafka..."
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic orders.created \
+          --partitions 3 \
+          --config retention.ms=604800000
+        
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic inventory.insufficient-stock \
+          --partitions 3 \
+          --config retention.ms=604800000
+        
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic inventory.reserved \
+          --partitions 3 \
+          --config retention.ms=604800000
+        
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic payments.authorized \
+          --partitions 3 \
+          --config retention.ms=604800000
+        
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic payments.denied \
+          --partitions 3 \
+          --config retention.ms=604800000
+        
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic inventory.released \
+          --partitions 3 \
+          --config retention.ms=604800000
+        
+        echo "Criando tópicos Kafka..."
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic orders.confirmed \
+          --partitions 3 \
+          --config retention.ms=604800000
+        
+        echo "Tópicos criados:"
+        kafka-topics --bootstrap-server kafka:9092 --list
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+
+volumes:
+  mysql_data:
+  mysql_payments_data:
+  postgres_data:

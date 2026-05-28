@@ -1,0 +1,16 @@
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Docs
+docs/
+
+# Binary
+api
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
