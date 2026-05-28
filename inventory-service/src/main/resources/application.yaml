@@ -26,8 +26,11 @@ server:
 otel:
   sdk:
     disabled: false
+  exporter:
+    otlp:
+      endpoint: http://localhost:4318
   traces:
-    exporter: none
+    exporter: otlp
   metrics:
     exporter: none
   logs:

@@ -13,3 +13,6 @@ kafka:
 
 outbox:
   batch_size: 10
+
+otel:
+  exporter_endpoint: "localhost:4317"

@@ -36,7 +36,7 @@ func main() {
 	defer logger.Sync()
 
 	// inicia tracer
-	tracer, err := config.InitTracer()
+	tracer, err := config.InitTracer(cfg.Otel)
 	if err != nil {
 		log.Fatalf("tracer: %v", err)
 	}

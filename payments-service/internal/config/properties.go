@@ -11,6 +11,11 @@ type Config struct {
 	MySQL  MySQLConfig  `mapstructure:"mysql"`
 	Kafka  KafkaConfig  `mapstructure:"kafka"`
 	Outbox OutboxConfig `mapstructure:"outbox"`
+	Otel   OtelConfig   `mapstructure:"otel"`
+}
+
+type OtelConfig struct {
+	ExporterEndpoint string `mapstructure:"exporter_endpoint"`
 }
 
 type ServerConfig struct {
@@ -51,6 +56,7 @@ func Load() *Config {
 	v.BindEnv("kafka.payment_authorized_topic", "KAFKA_PAYMENT_AUTHORIZED_TOPIC")
 	v.BindEnv("kafka.payment_denied_topic", "KAFKA_PAYMENT_DENIED_TOPIC")
 	v.BindEnv("outbox.batch_size", "OUTBOX_BATCH_SIZE")
+	v.BindEnv("otel.exporter_endpoint", "OTEL_EXPORTER_ENDPOINT")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {

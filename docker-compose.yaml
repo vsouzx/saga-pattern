@@ -132,6 +132,15 @@ services:
         echo "Tópicos criados:"
         kafka-topics --bootstrap-server kafka:9092 --list
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     depends_on:

@@ -12,6 +12,11 @@ type Config struct {
 	Redis  RedisConfig  `mapstructure:"redis"`
 	Kafka  KafkaConfig  `mapstructure:"kafka"`
 	Outbox OutboxConfig `mapstructure:"outbox"`
+	Otel   OtelConfig   `mapstructure:"otel"`
+}
+
+type OtelConfig struct {
+	ExporterEndpoint string `mapstructure:"exporter_endpoint"`
 }
 
 type ServerConfig struct {
@@ -64,6 +69,7 @@ func Load() *Config {
 	v.BindEnv("kafka.inventory_released_topic", "KAFKA_INVENTORY_RELEASED_TOPIC")
 	v.BindEnv("kafka.payments_topic", "KAFKA_PAYMENTS_TOPIC")
 	v.BindEnv("outbox.batch_size", "OUTBOX_BATCH_SIZE")
+	v.BindEnv("otel.exporter_endpoint", "OTEL_EXPORTER_ENDPOINT")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
