@@ -16,19 +16,33 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/contrib/bridges/otelzap"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func main() {
 	cfg := config.Load()
 
 	// inicia logger
-	logger, err := config.InitLogger()
+	baseLogger, err := config.InitLogger()
 	if err != nil {
 		log.Fatalf("logger: %v", err)
 	}
+	defer baseLogger.Sync()
+
+	// inicia log provider (OTLP)
+	logProvider, err := config.InitLoggerProvider(cfg.Otel, "payments-service")
+	if err != nil {
+		log.Fatalf("log provider: %v", err)
+	}
+	defer logProvider.Shutdown(context.Background())
+
+	// bridge zap -> otel
+	otelCore := otelzap.NewCore("payments-service", otelzap.WithLoggerProvider(logProvider))
+	logger := zap.New(zapcore.NewTee(baseLogger.Core(), otelCore))
 	defer logger.Sync()
 
 	// conecta ao banco de dados

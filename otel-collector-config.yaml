@@ -1,0 +1,34 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlp_grpc/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  otlp_http/loki:
+    endpoint: http://loki:3100/otlp
+
+processors:
+  batch:
+  resource:
+    attributes:
+      - action: insert
+        key: loki.resource.labels
+        value: service.name
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_grpc/jaeger]
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [otlp_http/loki]
