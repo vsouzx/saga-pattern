@@ -4,8 +4,7 @@ Implementacao de um sistema de pedidos distribuido utilizando o **Saga Pattern (
 
 ## Desenho arquitetura
 
-<img width="1907" height="883" alt="Image" src="https://github.com/user-attachments/assets/df15a9dc-0e8c-45bf-a9a1-5b844452a13a" />
-
+<img width="1405" height="813" alt="Image" src="https://github.com/user-attachments/assets/effd7891-5e74-404d-adee-35cc4095859f" />
 
 ## Indice
 
@@ -23,6 +22,10 @@ Implementacao de um sistema de pedidos distribuido utilizando o **Saga Pattern (
 - [Patterns Implementados](#patterns-implementados)
 - [API Endpoints](#api-endpoints)
 - [Como Executar](#como-executar)
+- [Observabilidade](#observabilidade)
+  - [Stack](#stack)
+  - [Fluxo de Dados](#fluxo-de-dados)
+  - [Correlacao Log-Trace](#correlacao-log-trace)
 - [Variaveis de Ambiente](#variaveis-de-ambiente)
 
 ---
@@ -36,8 +39,8 @@ Implementacao de um sistema de pedidos distribuido utilizando o **Saga Pattern (
 | Payments Service | Go 1.25, Gin, MySQL |
 | Mensageria | Apache Kafka (Confluent 7.6) |
 | Cache/Idempotencia | Redis |
-| Observabilidade | OpenTelemetry (distributed tracing) |
-| Logging | Zap (Go), SLF4J/Logback (Kotlin) |
+| Observabilidade | OpenTelemetry Collector, Jaeger, Loki, Grafana |
+| Logging | Zap + OTel Bridge (Go), SLF4J/Logback (Kotlin) |
 | Kafka Client (Go) | segmentio/kafka-go |
 | Kafka Client (Kotlin) | Spring Kafka |
 | UI Kafka | Kafka UI (Provectus) |
@@ -393,9 +396,9 @@ Protecao contra processamento duplicado em tres niveis:
 
 O Inventory Service usa `SELECT FOR UPDATE` ao reservar estoque, prevenindo race conditions em cenarios de alta concorrencia.
 
-### 5. Distributed Tracing (OpenTelemetry)
+### 5. Distributed Tracing & Centralized Logging (OpenTelemetry)
 
-Contexto de tracing (`traceparent`) e propagado via headers do Kafka, permitindo rastreamento ponta a ponta de um pedido atraves de todos os servicos.
+Contexto de tracing (`traceparent`) e propagado via headers do Kafka, permitindo rastreamento ponta a ponta de um pedido atraves de todos os servicos. Logs sao enviados ao Loki via OTel Collector com correlacao automatica de `trace_id` e `span_id`.
 
 ```
 Orders (span) ──> Kafka ──> Inventory (child span) ──> Kafka ──> Payments (child span)
@@ -453,7 +456,7 @@ O Inventory Service implementa arquitetura hexagonal com separacao clara entre:
 docker compose up -d
 ```
 
-Isso inicia: MySQL (x2), PostgreSQL, Redis, Zookeeper, Kafka, Kafka UI e cria automaticamente os topicos Kafka.
+Isso inicia: MySQL (x2), PostgreSQL, Redis, Zookeeper, Kafka, Kafka UI, OTel Collector, Jaeger, Loki, Grafana e cria automaticamente os topicos Kafka.
 
 ### 2. Verificar se os topicos foram criados
 
@@ -513,6 +516,81 @@ curl -X POST http://localhost:8081/v1/orders \
 
 ---
 
+## Observabilidade
+
+### Stack
+
+| Componente | Tecnologia | Porta | Descricao |
+|---|---|---|---|
+| **OTel Collector** | OpenTelemetry Collector Contrib | `4317` (gRPC), `4318` (HTTP) | Recebe traces e logs dos servicos via OTLP e roteia para Jaeger e Loki |
+| **Jaeger** | Jaeger All-in-One | `16686` | Armazenamento e visualizacao de distributed traces |
+| **Loki** | Grafana Loki | `3100` | Agregacao e indexacao de logs |
+| **Grafana** | Grafana | `3000` | Dashboards e visualizacao unificada de traces e logs |
+
+### Fluxo de Dados
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Go Services (orders-service, payments-service)              │
+│  ├─ Gin HTTP Handlers (otelgin middleware)                   │
+│  ├─ Kafka Consumers (trace context extraction)               │
+│  ├─ Zap Logger (JSON → stdout)                               │
+│  └─ OTel SDK (TracerProvider + LoggerProvider)               │
+└─────────────────────┬────────────────────────────────────────┘
+                      │ OTLP gRPC (:4317)
+                      │ traces + logs
+                      ▼
+┌──────────────────────────────────────────────────────────────┐
+│  OpenTelemetry Collector                                     │
+│  ├─ Receivers: otlp (gRPC + HTTP)                            │
+│  ├─ Processors: batch, transform/logs, resource              │
+│  └─ Exporters:                                               │
+│       ├─ otlp_grpc/jaeger → Jaeger (:4317)                  │
+│       └─ otlp_http/loki   → Loki (:3100/otlp)               │
+└──────────┬──────────────────────────────────┬────────────────┘
+           │                                  │
+           ▼                                  ▼
+    ┌────────────┐                     ┌──────────┐
+    │   Jaeger   │                     │   Loki   │
+    │  (Traces)  │                     │  (Logs)  │
+    └──────┬─────┘                     └────┬─────┘
+           │                                │
+           └──────────────┬─────────────────┘
+                          ▼
+                  ┌──────────────┐
+                  │   Grafana    │
+                  │   (:3000)    │
+                  │              │
+                  │ Datasources: │
+                  │ ├─ Jaeger    │
+                  │ └─ Loki      │
+                  └──────────────┘
+```
+
+**OTel Collector** atua como ponto central de coleta. Os servicos Go enviam traces e logs via OTLP gRPC. O Collector processa os dados (batching, transformacao de logs com `severity_text`, extracao de `trace_id`/`span_id`) e roteia traces para o **Jaeger** e logs para o **Loki**.
+
+### Correlacao Log-Trace
+
+Os logs enviados ao Loki incluem `trace_id` e `span_id` como atributos. O Grafana esta configurado com **Derived Fields** no datasource do Loki, permitindo clicar em um `trace_id` no log e navegar diretamente para o trace correspondente no Jaeger.
+
+**Instrumentacao nos servicos Go:**
+- **HTTP:** middleware `otelgin` cria spans automaticamente para cada request
+- **Kafka:** trace context e extraido dos headers das mensagens (`traceparent`)
+- **Logger:** `logger.FromContext(ctx)` enriquece cada log com `trace_id` e `span_id` do span ativo
+- **Dual output:** cada log e enviado tanto para stdout (JSON/Zap) quanto para o OTel Collector (via `otelzap` bridge)
+
+### Acessando as UIs
+
+| Servico | URL | Descricao |
+|---|---|---|
+| Grafana | [http://localhost:3000](http://localhost:3000) | Dashboards, logs (Loki) e traces (Jaeger) |
+| Jaeger | [http://localhost:16686](http://localhost:16686) | UI nativa do Jaeger para busca de traces |
+| Loki | `http://localhost:3100` | API de logs (acessado via Grafana) |
+
+> O Grafana ja vem provisionado com os datasources do Jaeger e Loki. Acesso anonimo esta habilitado para desenvolvimento.
+
+---
+
 ## Variaveis de Ambiente
 
 ### Orders Service
@@ -531,6 +609,7 @@ curl -X POST http://localhost:8081/v1/orders \
 | `KAFKA_INVENTORY_RELEASED_TOPIC` | `inventory.released` | Topico de estoque liberado |
 | `KAFKA_PAYMENTS_TOPIC` | `payments.authorized` | Topico de pagamentos autorizados |
 | `OUTBOX_BATCH_SIZE` | `10` | Tamanho do batch do relay |
+| `OTEL_EXPORTER_ENDPOINT` | `localhost:4317` | Endpoint gRPC do OTel Collector |
 
 ### Payments Service
 
@@ -543,6 +622,7 @@ curl -X POST http://localhost:8081/v1/orders \
 | `KAFKA_PAYMENT_AUTHORIZED_TOPIC` | `payments.authorized` | Topico de pagamento autorizado |
 | `KAFKA_PAYMENT_DENIED_TOPIC` | `payments.denied` | Topico de pagamento negado |
 | `OUTBOX_BATCH_SIZE` | `10` | Tamanho do batch do relay |
+| `OTEL_EXPORTER_ENDPOINT` | `localhost:4317` | Endpoint gRPC do OTel Collector |
 
 ### Inventory Service
 
