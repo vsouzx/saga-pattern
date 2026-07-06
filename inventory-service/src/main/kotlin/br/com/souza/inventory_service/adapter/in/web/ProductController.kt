@@ -32,7 +32,7 @@ class ProductController(
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    suspend fun create(@RequestBody request: CreateProductRequest): ProductResponse {
+    fun create(@RequestBody request: CreateProductRequest): ProductResponse {
         val product = createProduct.execute(request.name, request.price)
         return ProductResponse.from(product)
     }

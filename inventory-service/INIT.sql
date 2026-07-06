@@ -3,7 +3,7 @@
 -- =============================================
 
 CREATE TABLE IF NOT EXISTS products (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
+    id          SERIAL PRIMARY KEY,
     name        VARCHAR(255) NOT NULL,
     price       INTEGER NOT NULL CHECK (price >= 0)
 );
